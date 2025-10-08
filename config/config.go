@@ -14,6 +14,7 @@ type Config struct {
 	Redis       RedisConfig       `yaml:"redis"`
 	BloomFilter BloomFilterConfig `yaml:"bloom_filter"`
 	Snowflake   SnowflakeConfig   `yaml:"snowflake"`
+	RateLimit   RateLimitConfig   `yaml:"rate_limit"`
 }
 
 // ServerConfig represents server configuration
@@ -52,6 +53,27 @@ type BloomFilterConfig struct {
 type SnowflakeConfig struct {
 	DatacenterID int64 `yaml:"datacenter_id"`
 	WorkerID     int64 `yaml:"worker_id"`
+}
+
+// RateLimitConfig represents rate limiting configuration
+type RateLimitConfig struct {
+	Enabled   bool                     `yaml:"enabled"`
+	Strategy  string                   `yaml:"strategy"`
+	Global    RateLimitRule            `yaml:"global"`
+	Endpoints []EndpointRateLimitRule  `yaml:"endpoints"`
+}
+
+// RateLimitRule defines a rate limit rule
+type RateLimitRule struct {
+	Limit  int `yaml:"limit"`   // Maximum requests
+	Window int `yaml:"window"`  // Time window in seconds
+}
+
+// EndpointRateLimitRule defines endpoint-specific rate limits
+type EndpointRateLimitRule struct {
+	Path   string `yaml:"path"`
+	Limit  int    `yaml:"limit"`
+	Window int    `yaml:"window"`
 }
 
 // DSN returns MySQL data source name

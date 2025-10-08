@@ -14,6 +14,7 @@ import (
 	"github.com/Monthlyaway/short-link/internal/cache"
 	"github.com/Monthlyaway/short-link/internal/filter"
 	"github.com/Monthlyaway/short-link/internal/handler"
+	"github.com/Monthlyaway/short-link/internal/middleware"
 	"github.com/Monthlyaway/short-link/internal/repository"
 	"github.com/Monthlyaway/short-link/internal/service"
 	"github.com/Monthlyaway/short-link/internal/utils"
@@ -83,13 +84,81 @@ func main() {
 	// Initialize handler
 	urlHandler := handler.NewURLHandler(urlService, baseURL)
 
+	// ========================================================================
+	// MIDDLEWARE SETUP - Rate Limiting
+	// ========================================================================
+	// This demonstrates how to apply middleware in Gin
+	if cfg.RateLimit.Enabled {
+		log.Println("Rate limiting enabled with strategy:", cfg.RateLimit.Strategy)
+
+		// Convert strategy string to enum
+		var strategy middleware.RateLimitStrategy
+		switch cfg.RateLimit.Strategy {
+		case "fixed_window":
+			strategy = middleware.FixedWindow
+		case "sliding_window":
+			strategy = middleware.SlidingWindow
+		case "token_bucket":
+			strategy = middleware.TokenBucket
+		default:
+			strategy = middleware.SlidingWindow
+		}
+
+		// Global rate limiter (applies to all routes)
+		globalLimiter := middleware.NewRateLimiter(redisCache.GetClient(), &middleware.RateLimitConfig{
+			Strategy: strategy,
+			Limit:    cfg.RateLimit.Global.Limit,
+			Window:   time.Duration(cfg.RateLimit.Global.Window) * time.Second,
+			SkipFunc: middleware.SkipHealthCheck, // Don't rate limit health checks
+		})
+
+		// Apply global rate limiter to all routes
+		router.Use(globalLimiter.Middleware())
+	}
+
 	// Register routes
 	router.GET("/health", urlHandler.HealthCheck)
+
+	// ========================================================================
+	// ENDPOINT-SPECIFIC RATE LIMITING EXAMPLE
+	// ========================================================================
+	// You can also apply different rate limits to specific endpoints
+	if cfg.RateLimit.Enabled {
+		// Find rate limit config for redirect endpoint
+		for _, endpoint := range cfg.RateLimit.Endpoints {
+			if endpoint.Path == "/:short_code" {
+				redirectLimiter := middleware.NewRateLimiter(redisCache.GetClient(), &middleware.RateLimitConfig{
+					Strategy: middleware.SlidingWindow,
+					Limit:    endpoint.Limit,
+					Window:   time.Duration(endpoint.Window) * time.Second,
+				})
+				router.GET("/:short_code", redirectLimiter.Middleware(), urlHandler.RedirectToOriginalURL)
+				goto apiRoutes // Skip the default route registration
+			}
+		}
+	}
 	router.GET("/:short_code", urlHandler.RedirectToOriginalURL)
 
+apiRoutes:
 	api := router.Group("/api/v1")
 	{
+		// Apply endpoint-specific rate limit to /shorten if configured
+		if cfg.RateLimit.Enabled {
+			for _, endpoint := range cfg.RateLimit.Endpoints {
+				if endpoint.Path == "/api/v1/shorten" {
+					shortenLimiter := middleware.NewRateLimiter(redisCache.GetClient(), &middleware.RateLimitConfig{
+						Strategy: middleware.SlidingWindow,
+						Limit:    endpoint.Limit,
+						Window:   time.Duration(endpoint.Window) * time.Second,
+					})
+					api.POST("/shorten", shortenLimiter.Middleware(), urlHandler.CreateShortURL)
+					goto infoRoute
+				}
+			}
+		}
 		api.POST("/shorten", urlHandler.CreateShortURL)
+
+	infoRoute:
 		api.GET("/info/:short_code", urlHandler.GetURLInfo)
 	}
 

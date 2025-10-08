@@ -25,3 +25,18 @@ bloom_filter:
 snowflake:
   datacenter_id: 1
   worker_id: 1
+
+rate_limit:
+  enabled: true
+  strategy: "sliding_window"  # fixed_window, sliding_window, token_bucket
+  global:
+    limit: 100              # Maximum requests
+    window: 60              # Time window in seconds
+  endpoints:
+    # Custom limits for specific endpoints
+    - path: "/api/v1/shorten"
+      limit: 10             # 10 requests
+      window: 60            # per 60 seconds
+    - path: "/:short_code"
+      limit: 50             # 50 redirects
+      window: 60            # per 60 seconds
